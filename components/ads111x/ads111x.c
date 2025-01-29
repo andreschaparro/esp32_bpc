@@ -12,11 +12,6 @@
 #define ADS111X_REG_CONFIG 0x01    // Configuration register
 #define ADS111X_REG_LO_THRESH 0x02 // Low threshold register
 #define ADS111X_REG_HI_THRESH 0x03 // High threshold register
-// ADS111X I2C Addresses
-#define ADS111X_I2C_ADDR_GND 0x48 // ADDR pin connected to GND
-#define ADS111X_I2C_ADDR_VDD 0x49 // ADDR pin connected to VDD
-#define ADS111X_I2C_ADDR_SDA 0x4A // ADDR pin connected to SDA
-#define ADS111X_I2C_ADDR_SCL 0x4B // ADDR pin connected to SCL
 // ADS111X Operational Status
 #define ADS111X_OS_BUSY 0   // Conversion in progress
 #define ADS111X_OS_SINGLE 1 // Start a single conversion
@@ -75,23 +70,7 @@ esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr, g
     dev->i2c_addr = addr;
     i2c_master_bus_handle_t bus_handle;
     esp_err_t ret = i2c_master_get_bus_handle(dev->i2c_port, &bus_handle);
-    if (ret == ESP_ERR_INVALID_STATE)
-    {
-        i2c_master_bus_config_t i2c_mst_config = {
-            .clk_source = I2C_CLK_SRC_DEFAULT,
-            .i2c_port = port,
-            .scl_io_num = scl,
-            .sda_io_num = sda,
-            .glitch_ignore_cnt = 7,
-            .flags.enable_internal_pullup = true,
-        };
-        ret = i2c_new_master_bus(&i2c_mst_config, &bus_handle);
-        if (ret != ESP_OK)
-        {
-            return ret;
-        }
-    }
-    else if (ret != ESP_OK)
+    if (ret != ESP_OK)
     {
         return ret;
     }
