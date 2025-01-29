@@ -77,8 +77,8 @@ extern "C"
 
     typedef enum
     {
-        ADS111X_COMP_NON_LAT = 0, // Non-latching comparator (default)
-        ADS111X_COMP_LAT,         // Latching comparator
+        ADS111X_COMP_NON_LATCH = 0, // Non-latching comparator (default)
+        ADS111X_COMP_LATCH,         // Latching comparator
     } ads111x_comp_lat_t;
 
     typedef enum
@@ -88,6 +88,12 @@ extern "C"
         ADS111X_COMP_QUE_4,      // Assert after four conversions
         ADS111X_COMP_QUE_DISABLE // Disable comparator (default)
     } ads111x_comp_que_t;
+
+    typedef struct
+    {
+        int16_t raw; // Raw conversion result
+        float volt;  // Voltage conversion result in millivolts
+    } ads111x_conv_t;
 
     // ================================ Public Functions Declaration ==============================
 
@@ -114,7 +120,7 @@ extern "C"
     esp_err_t ads111x_set_comp_lo_thresh(ads111x_dev_t *dev, int16_t val);
     esp_err_t ads111x_get_comp_hi_thresh(ads111x_dev_t *dev, int16_t *val);
     esp_err_t ads111x_set_comp_hi_thresh(ads111x_dev_t *dev, int16_t val);
-    esp_err_t ads111x_get_conv(ads111x_dev_t *dev, int16_t *val);
+    esp_err_t ads111x_get_conv(ads111x_dev_t *dev, ads111x_conv_t *res);
 
 #ifdef __cplusplus
 }

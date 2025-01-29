@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
@@ -44,6 +45,7 @@ void app_main(void)
 static void ads111x_test_task(void *pvParameter)
 {
     ads111x_dev_t dev;
+    memset(&dev, 0, sizeof(ads111x_dev_t));
     if (ads111x_init(&dev, I2C_PORT, ADS111X_I2C_ADDR_GND, SDA_GPIO, SCL_GPIO) != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to initialize device");
@@ -56,71 +58,103 @@ static void ads111x_test_task(void *pvParameter)
         ESP_LOGI(TAG, "Device is %s", busy ? "busy" : "ready");
     }
 
-    ads111x_mux_t mux;
-    if (ads111x_get_mux(&dev, &mux) == ESP_OK)
+    if (ads111x_set_mux(&dev, ADS111X_MUX_SINGLE_0) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Input multiplexer: %d", mux);
+        ads111x_mux_t mux = 0;
+        if (ads111x_get_mux(&dev, &mux) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Input multiplexer: %d", mux);
+        }
     }
 
-    ads111x_pga_t pga;
-    if (ads111x_get_pga(&dev, &pga) == ESP_OK)
+    if (ads111x_set_pga(&dev, ADS111X_PGA_4_096V) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Programmable gain amplifier: %d", pga);
+        ads111x_pga_t pga = 0;
+        if (ads111x_get_pga(&dev, &pga) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Programmable gain amplifier: %d", pga);
+        }
     }
 
-    ads111x_mode_t mode;
-    if (ads111x_get_mode(&dev, &mode) == ESP_OK)
+    if (ads111x_set_mode(&dev, ADS111X_MODE_CONTINUOUS) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Operating mode: %d", mode);
+        ads111x_mode_t mode = 0;
+        if (ads111x_get_mode(&dev, &mode) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Operating mode: %d", mode);
+        }
     }
 
-    ads111x_dr_t dr;
-    if (ads111x_get_dr(&dev, &dr) == ESP_OK)
+    if (ads111x_set_dr(&dev, ADS111X_DR_250SPS) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Data rate: %d", dr);
+        ads111x_dr_t dr = 0;
+        if (ads111x_get_dr(&dev, &dr) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Data rate: %d", dr);
+        }
     }
 
-    ads111x_comp_mode_t comp;
-    if (ads111x_get_comp_mode(&dev, &comp) == ESP_OK)
+    if (ads111x_set_comp_mode(&dev, ADS111X_COMP_MODE_WINDOW) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Comparator mode: %d", comp);
+        ads111x_comp_mode_t comp = 0;
+        if (ads111x_get_comp_mode(&dev, &comp) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Comparator mode: %d", comp);
+        }
     }
 
-    ads111x_comp_pol_t pol;
-    if (ads111x_get_comp_pol(&dev, &pol) == ESP_OK)
+    if (ads111x_set_comp_pol(&dev, ADS111X_COMP_POL_HIGH) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Comparator polarity: %d", pol);
+        ads111x_comp_pol_t pol = 0;
+        if (ads111x_get_comp_pol(&dev, &pol) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Comparator polarity: %d", pol);
+        }
     }
 
-    ads111x_comp_lat_t lat;
-    if (ads111x_get_comp_lat(&dev, &lat) == ESP_OK)
+    if (ads111x_set_comp_lat(&dev, ADS111X_COMP_LATCH) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Comparator latch: %d", lat);
+        ads111x_comp_lat_t lat = 0;
+        if (ads111x_get_comp_lat(&dev, &lat) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Comparator latching: %d", lat);
+        }
     }
 
-    ads111x_comp_que_t que;
-    if (ads111x_get_comp_que(&dev, &que) == ESP_OK)
+    if (ads111x_set_comp_que(&dev, ADS111X_COMP_QUE_4) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Comparator queue: %d", que);
+        ads111x_comp_que_t que = 0;
+        if (ads111x_get_comp_que(&dev, &que) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Comparator queue: %d", que);
+        }
     }
 
-    int16_t lo_thresh;
-    if (ads111x_get_comp_lo_thresh(&dev, &lo_thresh) == ESP_OK)
+    if (ads111x_set_comp_lo_thresh(&dev, 1000) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Comparator low threshold: %d", lo_thresh);
+        int16_t lo_thresh = 0;
+        if (ads111x_get_comp_lo_thresh(&dev, &lo_thresh) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Comparator low threshold: %d", lo_thresh);
+        }
     }
 
-    int16_t hi_thresh;
-    if (ads111x_get_comp_hi_thresh(&dev, &hi_thresh) == ESP_OK)
+    if (ads111x_set_comp_hi_thresh(&dev, 2000) == ESP_OK)
     {
-        ESP_LOGI(TAG, "Comparator high threshold: %d", hi_thresh);
+        int16_t hi_thresh = 0;
+        if (ads111x_get_comp_hi_thresh(&dev, &hi_thresh) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Comparator high threshold: %d", hi_thresh);
+        }
     }
 
-    int16_t val;
-    if (ads111x_get_conv(&dev, &val) == ESP_OK)
+    for (;;)
     {
-        ESP_LOGI(TAG, "Conversion value: %d", val);
+        ads111x_conv_t res = {.raw = 0, .volt = 0.0f};
+        if (ads111x_get_conv(&dev, &res) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Conversion result: raw=%d , volt=%.3f mV", res.raw, res.volt);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-
-    vTaskDelete(NULL);
 }

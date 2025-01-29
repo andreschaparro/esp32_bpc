@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include "esp_log.h"
 #include "driver/i2c_master.h"
 #include "ads111x.h"
 
@@ -41,12 +40,23 @@
 #define ADS111X_COMP_QUE_MASK 0x03  // Comparator queue mask
 #define ADS111X_COMP_QUE_OFFSET 0   // Comparator queue offset
 
+// ================================ Private Constants =============================================
+
+static const float ads111x_lsb_values[] = {
+    0.1875f,    // +/-6.144V range = Gain 2/3
+    0.125f,     // +/-4.096V range = Gain 1
+    0.0625f,    // +/-2.048V range = Gain 2 (default)
+    0.03125f,   // +/-1.024V range = Gain 4
+    0.015625f,  // +/-0.512V range = Gain 8
+    0.0078125f, // +/-0.256V range = Gain 16
+};
+
 // ================================ Private Functions Declarations ================================
 
-static esp_err_t ads111x_reg_fld_wr(ads111x_dev_t *dev, uint8_t addr, uint16_t val, uint16_t mask, uint8_t off);
-static esp_err_t ads111x_reg_fld_rd(ads111x_dev_t *dev, uint8_t addr, uint16_t *val, uint16_t mask, uint8_t off);
-static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t addr, uint16_t *val);
-static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t addr, uint16_t val);
+static esp_err_t ads111x_reg_fld_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val, uint16_t mask, uint8_t off);
+static esp_err_t ads111x_reg_fld_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val, uint16_t mask, uint8_t off);
+static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val);
+static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val);
 
 // ================================ Public Functions Definitions ==================================
 
@@ -55,7 +65,9 @@ esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr, g
 {
     if (dev == NULL ||
         port >= I2C_NUM_MAX ||
-        addr < ADS111X_I2C_ADDR_GND || addr > ADS111X_I2C_ADDR_SCL)
+        addr < ADS111X_I2C_ADDR_GND || addr > ADS111X_I2C_ADDR_SCL ||
+        sda <= GPIO_NUM_NC || sda >= GPIO_NUM_MAX ||
+        scl <= GPIO_NUM_NC || scl >= GPIO_NUM_MAX)
     {
         return ESP_ERR_INVALID_ARG;
     }
@@ -106,7 +118,7 @@ esp_err_t ads111x_busy(ads111x_dev_t *dev, bool *busy)
         return ret;
     }
     *busy = (aux == ADS111X_OS_BUSY);
-    return ESP_OK;
+    return ret;
 }
 
 // Start a single conversion
@@ -259,7 +271,7 @@ esp_err_t ads111x_get_comp_lat(ads111x_dev_t *dev, ads111x_comp_lat_t *lat)
 esp_err_t ads111x_set_comp_lat(ads111x_dev_t *dev, ads111x_comp_lat_t lat)
 {
     if (dev == NULL ||
-        lat < ADS111X_COMP_NON_LAT || lat > ADS111X_COMP_LAT)
+        lat < ADS111X_COMP_NON_LATCH || lat > ADS111X_COMP_LATCH)
     {
         return ESP_ERR_INVALID_ARG;
     }
@@ -328,47 +340,58 @@ esp_err_t ads111x_set_comp_hi_thresh(ads111x_dev_t *dev, int16_t val)
 }
 
 // Get the last conversion result
-esp_err_t ads111x_get_conv(ads111x_dev_t *dev, int16_t *val)
+esp_err_t ads111x_get_conv(ads111x_dev_t *dev, ads111x_conv_t *res)
 {
-    if (dev == NULL || val == NULL)
+    if (dev == NULL || res == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    return ads111x_reg_val_rd(dev, ADS111X_REG_CONV, (uint16_t *)val);
+    esp_err_t ret = ads111x_reg_val_rd(dev, ADS111X_REG_CONV, (uint16_t *)&res->raw);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ads111x_pga_t pga = 0;
+    ret = ads111x_get_pga(dev, &pga);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    res->volt = (float)res->raw * ads111x_lsb_values[pga];
+    return ret;
 }
 
 // ================================ Private Functions Definitions =================================
 
-// Low level function to write a register field
-static esp_err_t ads111x_reg_fld_wr(ads111x_dev_t *dev, uint8_t addr, uint16_t val, uint16_t mask, uint8_t off)
+// Low level function to write the value of a register field
+static esp_err_t ads111x_reg_fld_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val, uint16_t mask, uint8_t off)
 {
     uint16_t aux = 0;
-    esp_err_t ret = ads111x_reg_val_rd(dev, addr, &aux);
+    esp_err_t ret = ads111x_reg_val_rd(dev, reg, &aux);
     if (ret != ESP_OK)
     {
         return ret;
     }
     aux = (aux & ~(mask << off)) | ((val << off) & (mask << off));
-    return ads111x_reg_val_wr(dev, addr, aux);
+    return ads111x_reg_val_wr(dev, reg, aux);
 }
 
-// Low level function to read a register field
-static esp_err_t ads111x_reg_fld_rd(ads111x_dev_t *dev, uint8_t addr, uint16_t *val, uint16_t mask, uint8_t off)
+// Low level function to read the value of a register field
+static esp_err_t ads111x_reg_fld_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val, uint16_t mask, uint8_t off)
 {
-    esp_err_t ret = ads111x_reg_val_rd(dev, addr, val);
+    esp_err_t ret = ads111x_reg_val_rd(dev, reg, val);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    ESP_LOGI("ads111x", "val: %d", *val);
     *val = (*val & (mask << off)) >> off;
-    return ESP_OK;
+    return ret;
 }
 
-// Low level function to read a register value
-static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t addr, uint16_t *val)
+// Low level function to read the value of a register
+static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val)
 {
-    uint8_t data_wr = addr;
+    uint8_t data_wr = reg;
     uint8_t data_rd[2] = {0};
     esp_err_t ret = i2c_master_transmit_receive(dev->i2c_dev, &data_wr, sizeof(data_wr), data_rd, sizeof(data_rd), I2C_TIMEOUT_MS);
     if (ret != ESP_OK)
@@ -376,14 +399,14 @@ static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t addr, uint16_t *
         return ret;
     }
     *val = (data_rd[0] << 8) | data_rd[1]; // MSB | LSB
-    return ESP_OK;
+    return ret;
 }
 
-// Low level function to write a register value
-static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t addr, uint16_t val)
+// Low level function to write the value of a register
+static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val)
 {
     uint8_t data_wr[3] = {0};
-    data_wr[0] = addr;              // Register address
+    data_wr[0] = reg;               // Register address
     data_wr[1] = (val >> 8) & 0xFF; // MSB
     data_wr[2] = val & 0xFF;        // LSB
     return i2c_master_transmit(dev->i2c_dev, data_wr, 3, I2C_TIMEOUT_MS);
