@@ -13,6 +13,7 @@ extern "C"
 #define MCP4725_I2C_ADDR_VDD 0x61 // I2C address with ADDR pin connected to VDD
 #define MCP4725_I2C_ADDR_SDA 0x62 // I2C address with ADDR pin connected to SDA
 #define MCP4725_I2C_ADDR_SCL 0x63 // I2C address with ADDR pin connected to SCL
+#define MCP4725_MAX_VALUE 4095    // Maximum value for 12-bit DAC
 
     // ================================ Public Data Types =========================================
 
@@ -33,14 +34,14 @@ extern "C"
 
     // ================================ Public Functions Declaration ==============================
 
-    esp_err_t mcp4725_init(mcp4725_dev_t *dev, i2c_port_t port, uint16_t addr, gpio_num_t sda, gpio_num_t scl);
+    esp_err_t mcp4725_init(mcp4725_dev_t *dev, i2c_port_t port, uint16_t addr);
     esp_err_t mcp4725_eeprom_busy(mcp4725_dev_t *dev, bool *busy);
-    esp_err_t mcp4725_get_pd_mode(mcp4725_dev_t *dev, bool eeprom, mcp4725_pd_mode_t *pd);
-    esp_err_t mcp4725_set_pd_mode(mcp4725_dev_t *dev, bool eeprom, mcp4725_pd_mode_t pd);
-    esp_err_t mcp4725_get_raw(mcp4725_dev_t *dev, bool eeprom, uint16_t *val);
-    esp_err_t mcp4725_set_raw(mcp4725_dev_t *dev, bool eeprom, uint16_t val);
-    esp_err_t mcp4725_get_volt(mcp4725_dev_t *dev, bool eeprom, float vdd, float *volt);
-    esp_err_t mcp4725_set_volt(mcp4725_dev_t *dev, bool eeprom, float volt);
+    esp_err_t mcp4725_get_pd_mode(mcp4725_dev_t *dev, mcp4725_pd_mode_t *pd_mode, bool eeprom);
+    esp_err_t mcp4725_set_pd_mode(mcp4725_dev_t *dev, mcp4725_pd_mode_t pd_mode, bool eeprom);
+    esp_err_t mcp4725_get_raw(mcp4725_dev_t *dev, uint16_t *val, bool eeprom);
+    esp_err_t mcp4725_set_raw(mcp4725_dev_t *dev, uint16_t val, bool eeprom);
+    esp_err_t mcp4725_get_volt(mcp4725_dev_t *dev, float *volt, float vdd, bool eeprom);
+    esp_err_t mcp4725_set_volt(mcp4725_dev_t *dev, float volt, float vdd, bool eeprom);
 
 #ifdef __cplusplus
 }

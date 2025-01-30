@@ -97,7 +97,7 @@ extern "C"
 
     // ================================ Public Functions Declaration ==============================
 
-    esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr, gpio_num_t sda, gpio_num_t scl);
+    esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr);
     esp_err_t ads111x_busy(ads111x_dev_t *dev, bool *busy);
     esp_err_t ads111x_start_conv(ads111x_dev_t *dev);
     esp_err_t ads111x_get_mux(ads111x_dev_t *dev, ads111x_mux_t *mux);

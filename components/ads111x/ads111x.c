@@ -56,13 +56,11 @@ static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t va
 // ================================ Public Functions Definitions ==================================
 
 // Initialize the device
-esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr, gpio_num_t sda, gpio_num_t scl)
+esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr)
 {
     if (dev == NULL ||
         port >= I2C_NUM_MAX ||
-        addr < ADS111X_I2C_ADDR_GND || addr > ADS111X_I2C_ADDR_SCL ||
-        sda <= GPIO_NUM_NC || sda >= GPIO_NUM_MAX ||
-        scl <= GPIO_NUM_NC || scl >= GPIO_NUM_MAX)
+        addr < ADS111X_I2C_ADDR_GND || addr > ADS111X_I2C_ADDR_SCL)
     {
         return ESP_ERR_INVALID_ARG;
     }
