@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "ads111x.h"
 #include "mcp4725.h"
+#include "pcf8574.h"
 
 // ================================ Public Defines ================================================
 
@@ -21,6 +22,7 @@ static const char *TAG = "MAIN";
 static esp_err_t i2c_master_init(i2c_port_t port, gpio_num_t sda, gpio_num_t scl);
 static void ads111x_handle_task(void *pvParameter);
 static void mcp4725_handle_task(void *pvParameter);
+static void pcf8574_handle_task(void *pvParameter);
 
 // ================================ Program Entry Point ===========================================
 
@@ -38,7 +40,7 @@ void app_main(void)
         APP_CPU_NUM);
     if (xReturned != pdPASS)
     {
-        ESP_LOGE(TAG, "Failed to create ads111x_test_task");
+        ESP_LOGE(TAG, "Failed to create ads111x_handle_task");
     }
     xReturned = xTaskCreatePinnedToCore(
         mcp4725_handle_task,
@@ -50,7 +52,19 @@ void app_main(void)
         APP_CPU_NUM);
     if (xReturned != pdPASS)
     {
-        ESP_LOGE(TAG, "Failed to create mcp4725_test_task");
+        ESP_LOGE(TAG, "Failed to create mcp4725_handle_task");
+    }
+    xReturned = xTaskCreatePinnedToCore(
+        pcf8574_handle_task,
+        "pcf8574_handle_task",
+        configMINIMAL_STACK_SIZE * 8,
+        NULL,
+        5,
+        NULL,
+        APP_CPU_NUM);
+    if (xReturned != pdPASS)
+    {
+        ESP_LOGE(TAG, "Failed to create pcf8574_handle_task");
     }
     vTaskDelete(NULL);
 }
@@ -90,7 +104,7 @@ static void ads111x_handle_task(void *pvParameter)
     const size_t num_channels = sizeof(mux_channels) / sizeof(mux_channels[0]);
     for (;;)
     {
-        for (uint8_t i = 0; i < num_channels; i++)
+        for (size_t i = 0; i < num_channels; i++)
         {
             if (ads111x_set_mux(&dev, mux_channels[i]) != ESP_OK)
             {
@@ -172,5 +186,34 @@ static void mcp4725_handle_task(void *pvParameter)
             val = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// Task to handle the PCF8574 device
+static void pcf8574_handle_task(void *pvParameter)
+{
+    pcf8574_dev_t dev = {0};
+    ESP_ERROR_CHECK(pcf8574_init(&dev, I2C_PORT, PCF8574_I2C_ADDR_HHH));
+    pcf8574_pin_t pins[] = {
+        PCF8574_P0,
+        PCF8574_P1,
+        PCF8574_P2,
+        PCF8574_P3,
+        PCF8574_P4,
+        PCF8574_P5,
+        PCF8574_P6,
+        PCF8574_P7,
+    };
+    size_t num_pins = sizeof(pins) / sizeof(pins[0]);
+    pcf8574_state_t val = 0;
+    for (;;)
+    {
+        for (size_t i = 0; i < num_pins; i++)
+        {
+            ESP_ERROR_CHECK(pcf8574_toogle_pin(&dev, pins[i]));
+            ESP_ERROR_CHECK(pcf8574_get_pin(&dev, pins[i], &val));
+            ESP_LOGI(TAG, "Pin %d: %s", pins[i], val == PCF8574_LOW ? "LOW" : "HIGH");
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
     }
 }
