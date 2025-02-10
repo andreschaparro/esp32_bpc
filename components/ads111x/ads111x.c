@@ -2,389 +2,463 @@
 #include "driver/i2c_master.h"
 #include "ads111x.h"
 
-// ================================ Private Defines ===============================================
+static esp_err_t s_ads111x_read_register(i2c_master_dev_handle_t *dev_handle,
+                                         ads111x_reg_t reg,
+                                         uint16_t *data);
+static esp_err_t s_ads111x_write_register(i2c_master_dev_handle_t *dev_handle,
+                                          ads111x_reg_t reg,
+                                          uint16_t data);
 
-// I2C master configuration
-#define I2C_MASTER_FREQ_HZ 100000 // I2C master clock frequency
-#define I2C_TIMEOUT_MS 1000       // I2C timeout in milliseconds
-// ADS111X Registers
-#define ADS111X_REG_CONV 0x00      // Conversion register
-#define ADS111X_REG_CONFIG 0x01    // Configuration register
-#define ADS111X_REG_LO_THRESH 0x02 // Low threshold register
-#define ADS111X_REG_HI_THRESH 0x03 // High threshold register
-// ADS111X Operational Status
-#define ADS111X_OS_BUSY 0   // Conversion in progress
-#define ADS111X_OS_SINGLE 1 // Start a single conversion
-// ADS111X MASKS and OFFSETS
-#define ADS111X_OS_MASK 0x01        // Operational status mask
-#define ADS111X_OS_OFFSET 15        // Operational status offset
-#define ADS111X_MUX_MASK 0x07       // Input multiplexer configuration mask
-#define ADS111X_MUX_OFFSET 12       // Input multiplexer configuration offset
-#define ADS111X_PGA_MASK 0x07       // Programmable gain amplifier configuration mask
-#define ADS111X_PGA_OFFSET 9        // Programmable gain amplifier configuration offset
-#define ADS111X_MODE_MASK 0x01      // Device operating mode mask
-#define ADS111X_MODE_OFFSET 8       // Device operating mode offset
-#define ADS111X_DR_MASK 0x07        // Data rate mask
-#define ADS111X_DR_OFFSET 5         // Data rate offset
-#define ADS111X_COMP_MODE_MASK 0x01 // Comparator mode mask
-#define ADS111X_COMP_MODE_OFFSET 4  // Comparator mode offset
-#define ADS111X_COMP_POL_MASK 0x01  // Comparator polarity mask
-#define ADS111X_COMP_POL_OFFSET 3   // Comparator polarity offset
-#define ADS111X_COMP_LAT_MASK 0x01  // Comparator latching mask
-#define ADS111X_COMP_LAT_OFFSET 2   // Comparator latching offset
-#define ADS111X_COMP_QUE_MASK 0x03  // Comparator queue mask
-#define ADS111X_COMP_QUE_OFFSET 0   // Comparator queue offset
-
-// ================================ Private Constants =============================================
-
-static const float ads111x_lsb_values[] = {
-    0.1875f,    // +/-6.144V range = Gain 2/3
-    0.125f,     // +/-4.096V range = Gain 1
-    0.0625f,    // +/-2.048V range = Gain 2 (default)
-    0.03125f,   // +/-1.024V range = Gain 4
-    0.015625f,  // +/-0.512V range = Gain 8
-    0.0078125f, // +/-0.256V range = Gain 16
-};
-
-// ================================ Private Functions Declarations ================================
-
-static esp_err_t ads111x_reg_fld_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val, uint16_t mask, uint8_t off);
-static esp_err_t ads111x_reg_fld_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val, uint16_t mask, uint8_t off);
-static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val);
-static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val);
-
-// ================================ Public Functions Definitions ==================================
-
-// Initialize the device
-esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr)
+esp_err_t ads111x_init(i2c_master_dev_handle_t *dev_handle,
+                       i2c_port_num_t port,
+                       ads111x_address_t address,
+                       uint32_t speed_hz)
 {
-    if (dev == NULL ||
+    if (dev_handle == NULL ||
         port >= I2C_NUM_MAX ||
-        addr < ADS111X_I2C_ADDR_GND || addr > ADS111X_I2C_ADDR_SCL)
+        address < ADS111X_ADDR_GND || address > ADS111X_ADDR_SCL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    dev->i2c_port = port;
-    dev->i2c_addr = addr;
     i2c_master_bus_handle_t bus_handle;
-    esp_err_t ret = i2c_master_get_bus_handle(dev->i2c_port, &bus_handle);
+    esp_err_t ret = i2c_master_get_bus_handle(port, &bus_handle);
     if (ret != ESP_OK)
     {
         return ret;
     }
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = dev->i2c_addr,
-        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
+        .device_address = (uint16_t)address,
+        .scl_speed_hz = speed_hz,
         .scl_wait_us = 1000,
     };
-    return i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev->i2c_dev);
+    return i2c_master_bus_add_device(bus_handle, &dev_cfg, dev_handle);
 }
 
-// Check if the device is busy
-esp_err_t ads111x_busy(ads111x_dev_t *dev, bool *busy)
+esp_err_t ads111x_read_os(i2c_master_dev_handle_t *dev_handle,
+                          ads111x_os_t *os)
 {
-    if (dev == NULL || busy == NULL)
+    if (dev_handle == NULL || os == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    uint16_t aux = 0;
-    esp_err_t ret = ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, &aux, ADS111X_OS_MASK, ADS111X_OS_OFFSET);
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *busy = (aux == ADS111X_OS_BUSY);
+    *os = (ads111x_os_t)((data >> 15) & 0x01);
     return ret;
 }
 
-// Start a single conversion
-esp_err_t ads111x_start_conv(ads111x_dev_t *dev)
+esp_err_t ads111x_start_single_conv(i2c_master_dev_handle_t *dev_handle)
 {
-    if (dev == NULL)
+    if (dev_handle == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, ADS111X_OS_SINGLE, ADS111X_OS_MASK, ADS111X_OS_OFFSET);
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data |= 0x8000;
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
 }
 
-// Get the input multiplexer
-esp_err_t ads111x_get_mux(ads111x_dev_t *dev, ads111x_mux_t *mux)
+esp_err_t ads111x_read_mux(i2c_master_dev_handle_t *dev_handle,
+                           ads111x_mux_t *mux)
 {
-    if (dev == NULL || mux == NULL)
+    if (dev_handle == NULL || mux == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)mux, ADS111X_MUX_MASK, ADS111X_MUX_OFFSET);
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *mux = (ads111x_mux_t)((data >> 12) & 0x07);
+    return ret;
 }
 
-// Set the input multiplexer
-esp_err_t ads111x_set_mux(ads111x_dev_t *dev, ads111x_mux_t mux)
+esp_err_t ads111x_write_mux(i2c_master_dev_handle_t *dev_handle,
+                            ads111x_mux_t mux)
 {
-    if (dev == NULL ||
-        mux < ADS111X_MUX_DIFF_0_1 || mux > ADS111X_MUX_SINGLE_3)
+    if (dev_handle == NULL ||
+        mux < ADS111X_MUX_AIN0_AIN1 || mux > ADS111X_MUX_AIN3_GND)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)mux, ADS111X_MUX_MASK, ADS111X_MUX_OFFSET);
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data = (data & ~(0x07 << 12)) | ((mux & 0x07) << 12);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
 }
 
-// Get the programmable gain amplifier
-esp_err_t ads111x_get_pga(ads111x_dev_t *dev, ads111x_pga_t *pga)
+esp_err_t ads111x_read_pga(i2c_master_dev_handle_t *dev_handle,
+                           ads111x_pga_t *pga)
 {
-    if (dev == NULL || pga == NULL)
+    if (dev_handle == NULL || pga == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)pga, ADS111X_PGA_MASK, ADS111X_PGA_OFFSET);
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *pga = (ads111x_pga_t)((data >> 9) & 0x07);
+    return ret;
 }
 
-// Set the programmable gain amplifier
-esp_err_t ads111x_set_pga(ads111x_dev_t *dev, ads111x_pga_t pga)
+esp_err_t ads111x_write_pga(i2c_master_dev_handle_t *dev_handle,
+                            ads111x_pga_t pga)
 {
-    if (dev == NULL ||
+    if (dev_handle == NULL ||
         pga < ADS111X_PGA_6_144V || pga > ADS111X_PGA_0_256V)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)pga, ADS111X_PGA_MASK, ADS111X_PGA_OFFSET);
-}
-
-// Get the operating mode
-esp_err_t ads111x_get_mode(ads111x_dev_t *dev, ads111x_mode_t *mode)
-{
-    if (dev == NULL || mode == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)mode, ADS111X_MODE_MASK, ADS111X_MODE_OFFSET);
-}
-
-// Set the operating mode
-esp_err_t ads111x_set_mode(ads111x_dev_t *dev, ads111x_mode_t mode)
-{
-    if (dev == NULL ||
-        mode < ADS111X_MODE_CONTINUOUS || mode > ADS111X_MODE_SINGLE_SHOT)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)mode, ADS111X_MODE_MASK, ADS111X_MODE_OFFSET);
-}
-
-// Get the data rate
-esp_err_t ads111x_get_dr(ads111x_dev_t *dev, ads111x_dr_t *rate)
-{
-    if (dev == NULL || rate == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)rate, ADS111X_DR_MASK, ADS111X_DR_OFFSET);
-}
-
-// Set the data rate
-esp_err_t ads111x_set_dr(ads111x_dev_t *dev, ads111x_dr_t rate)
-{
-    if (dev == NULL ||
-        rate < ADS111X_DR_8SPS || rate > ADS111X_DR_860SPS)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)rate, ADS111X_DR_MASK, ADS111X_DR_OFFSET);
-}
-
-// Get the comparator mode
-esp_err_t ads111x_get_comp_mode(ads111x_dev_t *dev, ads111x_comp_mode_t *comp)
-{
-    if (dev == NULL || comp == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)comp, ADS111X_COMP_MODE_MASK, ADS111X_COMP_MODE_OFFSET);
-}
-
-// Set the comparator mode
-esp_err_t ads111x_set_comp_mode(ads111x_dev_t *dev, ads111x_comp_mode_t comp)
-{
-    if (dev == NULL ||
-        comp < ADS111X_COMP_MODE_TRADITIONAL || comp > ADS111X_COMP_MODE_WINDOW)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)comp, ADS111X_COMP_MODE_MASK, ADS111X_COMP_MODE_OFFSET);
-}
-
-// Get the comparator polarity
-esp_err_t ads111x_get_comp_pol(ads111x_dev_t *dev, ads111x_comp_pol_t *pol)
-{
-    if (dev == NULL || pol == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)pol, ADS111X_COMP_POL_MASK, ADS111X_COMP_POL_OFFSET);
-}
-
-// Set the comparator polarity
-esp_err_t ads111x_set_comp_pol(ads111x_dev_t *dev, ads111x_comp_pol_t pol)
-{
-    if (dev == NULL ||
-        pol < ADS111X_COMP_POL_LOW || pol > ADS111X_COMP_POL_HIGH)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)pol, ADS111X_COMP_POL_MASK, ADS111X_COMP_POL_OFFSET);
-}
-
-// Get the comparator latching
-esp_err_t ads111x_get_comp_lat(ads111x_dev_t *dev, ads111x_comp_lat_t *lat)
-{
-    if (dev == NULL || lat == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)lat, ADS111X_COMP_LAT_MASK, ADS111X_COMP_LAT_OFFSET);
-}
-
-// Set the comparator latching
-esp_err_t ads111x_set_comp_lat(ads111x_dev_t *dev, ads111x_comp_lat_t lat)
-{
-    if (dev == NULL ||
-        lat < ADS111X_COMP_NON_LATCH || lat > ADS111X_COMP_LATCH)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)lat, ADS111X_COMP_LAT_MASK, ADS111X_COMP_LAT_OFFSET);
-}
-
-// Get the comparator queue
-esp_err_t ads111x_get_comp_que(ads111x_dev_t *dev, ads111x_comp_que_t *que)
-{
-    if (dev == NULL || que == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_rd(dev, ADS111X_REG_CONFIG, (uint16_t *)que, ADS111X_COMP_QUE_MASK, ADS111X_COMP_QUE_OFFSET);
-}
-
-// Set the comparator queue
-esp_err_t ads111x_set_comp_que(ads111x_dev_t *dev, ads111x_comp_que_t que)
-{
-    if (dev == NULL ||
-        que < ADS111X_COMP_QUE_1 || que > ADS111X_COMP_QUE_DISABLE)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_fld_wr(dev, ADS111X_REG_CONFIG, (uint16_t)que, ADS111X_COMP_QUE_MASK, ADS111X_COMP_QUE_OFFSET);
-}
-
-// Get the low threshold comparator
-esp_err_t ads111x_get_comp_lo_thresh(ads111x_dev_t *dev, int16_t *val)
-{
-    if (dev == NULL || val == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_val_rd(dev, ADS111X_REG_LO_THRESH, (uint16_t *)val);
-}
-
-// Set the low threshold comparator
-esp_err_t ads111x_set_comp_lo_thresh(ads111x_dev_t *dev, int16_t val)
-{
-    if (dev == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_val_wr(dev, ADS111X_REG_LO_THRESH, (uint16_t)val);
-}
-
-// Get the high threshold comparator
-esp_err_t ads111x_get_comp_hi_thresh(ads111x_dev_t *dev, int16_t *val)
-{
-    if (dev == NULL || val == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_val_rd(dev, ADS111X_REG_HI_THRESH, (uint16_t *)val);
-}
-
-// Set the high threshold comparator
-esp_err_t ads111x_set_comp_hi_thresh(ads111x_dev_t *dev, int16_t val)
-{
-    if (dev == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ads111x_reg_val_wr(dev, ADS111X_REG_HI_THRESH, (uint16_t)val);
-}
-
-// Get the last conversion result
-esp_err_t ads111x_get_conv(ads111x_dev_t *dev, ads111x_conv_t *res)
-{
-    if (dev == NULL || res == NULL)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-    esp_err_t ret = ads111x_reg_val_rd(dev, ADS111X_REG_CONV, (uint16_t *)&res->raw);
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    ads111x_pga_t pga = 0;
-    ret = ads111x_get_pga(dev, &pga);
+    data = (data & ~(0x07 << 9)) | ((pga & 0x07) << 9);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
+}
+
+esp_err_t ads111x_read_mode(i2c_master_dev_handle_t *dev_handle,
+                            ads111x_mode_t *mode)
+{
+    if (dev_handle == NULL || mode == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    res->volt = (float)res->raw * ads111x_lsb_values[pga];
+    *mode = (ads111x_mode_t)((data >> 8) & 0x01);
     return ret;
 }
 
-// ================================ Private Functions Definitions =================================
-
-// Low level function to write the value of a register field
-static esp_err_t ads111x_reg_fld_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val, uint16_t mask, uint8_t off)
+esp_err_t ads111x_write_mode(i2c_master_dev_handle_t *dev_handle,
+                             ads111x_mode_t mode)
 {
-    uint16_t aux = 0;
-    esp_err_t ret = ads111x_reg_val_rd(dev, reg, &aux);
+    if (dev_handle == NULL ||
+        (mode != ADS111X_MODE_CONTINUOUS && mode != ADS111X_MODE_SINGLE_SHOT))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    aux = (aux & ~(mask << off)) | ((val << off) & (mask << off));
-    return ads111x_reg_val_wr(dev, reg, aux);
+    data = (data & ~(0x01 << 8)) | ((mode & 0x01) << 8);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
 }
 
-// Low level function to read the value of a register field
-static esp_err_t ads111x_reg_fld_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val, uint16_t mask, uint8_t off)
+esp_err_t ads111x_read_dr(i2c_master_dev_handle_t *dev_handle,
+                          ads111x_dr_t *dr)
 {
-    esp_err_t ret = ads111x_reg_val_rd(dev, reg, val);
+    if (dev_handle == NULL || dr == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *val = (*val & (mask << off)) >> off;
+    *dr = (ads111x_dr_t)((data >> 5) & 0x07);
     return ret;
 }
 
-// Low level function to read the value of a register
-static esp_err_t ads111x_reg_val_rd(ads111x_dev_t *dev, uint8_t reg, uint16_t *val)
+esp_err_t ads111x_write_dr(i2c_master_dev_handle_t *dev_handle,
+                           ads111x_dr_t dr)
 {
+    if (dev_handle == NULL ||
+        dr < ADS111X_DR_8SPS || dr > ADS111X_DR_860SPS)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data = (data & ~(0x07 << 5)) | ((dr & 0x07) << 5);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
+}
+
+esp_err_t ads111x_read_comp_mode(i2c_master_dev_handle_t *dev_handle,
+                                 ads111x_comp_mode_t *comp_mode)
+{
+    if (dev_handle == NULL || comp_mode == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *comp_mode = (ads111x_comp_mode_t)((data >> 4) & 0x01);
+    return ret;
+}
+
+esp_err_t ads111x_write_comp_mode(i2c_master_dev_handle_t *dev_handle,
+                                  ads111x_comp_mode_t comp_mode)
+{
+    if (dev_handle == NULL ||
+        (comp_mode != ADS111X_COMP_MODE_TRADITIONAL && comp_mode != ADS111X_COMP_MODE_WINDOW))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data = (data & ~(0x01 << 4)) | ((comp_mode & 0x01) << 4);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
+}
+
+esp_err_t ads111x_read_comp_pol(i2c_master_dev_handle_t *dev_handle,
+                                ads111x_comp_pol_t *comp_pol)
+{
+    if (dev_handle == NULL || comp_pol == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *comp_pol = (ads111x_comp_pol_t)((data >> 3) & 0x01);
+    return ret;
+}
+
+esp_err_t ads111x_write_comp_pol(i2c_master_dev_handle_t *dev_handle,
+                                 ads111x_comp_pol_t comp_pol)
+{
+    if (dev_handle == NULL ||
+        (comp_pol != ADS111X_COMP_POL_LOW && comp_pol != ADS111X_COMP_POL_HIGH))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data = (data & ~(0x01 << 3)) | ((comp_pol & 0x01) << 3);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
+}
+
+esp_err_t ads111x_read_comp_lat(i2c_master_dev_handle_t *dev_handle,
+                                ads111x_comp_lat_t *comp_lat)
+{
+    if (dev_handle == NULL || comp_lat == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *comp_lat = (ads111x_comp_lat_t)((data >> 2) & 0x01);
+    return ret;
+}
+
+esp_err_t ads111x_write_comp_lat(i2c_master_dev_handle_t *dev_handle,
+                                 ads111x_comp_lat_t comp_lat)
+{
+    if (dev_handle == NULL ||
+        (comp_lat != ADS111X_COMP_NON_LATCH && comp_lat != ADS111X_COMP_LATCH))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data = (data & ~(0x01 << 2)) | ((comp_lat & 0x01) << 2);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
+}
+
+esp_err_t ads111x_read_comp_que(i2c_master_dev_handle_t *dev_handle,
+                                ads111x_comp_que_t *comp_que)
+{
+    if (dev_handle == NULL || comp_que == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *comp_que = (ads111x_comp_que_t)(data & 0x03);
+    return ret;
+}
+
+esp_err_t ads111x_write_comp_que(i2c_master_dev_handle_t *dev_handle,
+                                 ads111x_comp_que_t comp_que)
+{
+    if (dev_handle == NULL ||
+        comp_que < ADS111X_COMP_QUE_1 || comp_que > ADS111X_COMP_QUE_DISABLE)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = s_ads111x_read_register(dev_handle, ADS111X_CONFIG_REG, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    data = (data & ~0x03) | (comp_que & 0x03);
+    return s_ads111x_write_register(dev_handle, ADS111X_CONFIG_REG, data);
+}
+
+esp_err_t ads111x_read_comp_lo_thresh(i2c_master_dev_handle_t *dev_handle,
+                                      int16_t *val)
+{
+    if (dev_handle == NULL || val == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return s_ads111x_read_register(dev_handle, ADS111X_LO_THRESH_REG, (uint16_t *)val);
+}
+
+esp_err_t ads111x_write_comp_lo_thresh(i2c_master_dev_handle_t *dev_handle,
+                                       int16_t val)
+{
+    if (dev_handle == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return s_ads111x_write_register(dev_handle, ADS111X_LO_THRESH_REG, (uint16_t)val);
+}
+
+esp_err_t ads111x_read_comp_hi_thresh(i2c_master_dev_handle_t *dev_handle,
+                                      int16_t *val)
+{
+    if (dev_handle == NULL || val == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return s_ads111x_read_register(dev_handle, ADS111X_HI_THRESH_REG, (uint16_t *)val);
+}
+
+esp_err_t ads111x_write_comp_hi_thresh(i2c_master_dev_handle_t *dev_handle,
+                                       int16_t val)
+{
+    if (dev_handle == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return s_ads111x_write_register(dev_handle, ADS111X_HI_THRESH_REG, (uint16_t)val);
+}
+
+esp_err_t ads111x_read_conv(i2c_master_dev_handle_t *dev_handle,
+                            int16_t *val)
+{
+    if (dev_handle == NULL || val == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return s_ads111x_read_register(dev_handle, ADS111X_CONV_REG, (uint16_t *)val);
+}
+
+static esp_err_t s_ads111x_read_register(i2c_master_dev_handle_t *dev_handle,
+                                         ads111x_reg_t reg,
+                                         uint16_t *data)
+{
+    if (dev_handle == NULL ||
+        reg < ADS111X_CONV_REG || reg > ADS111X_HI_THRESH_REG ||
+        data == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
     uint8_t data_wr = reg;
     uint8_t data_rd[2] = {0};
-    esp_err_t ret = i2c_master_transmit_receive(dev->i2c_dev, &data_wr, sizeof(data_wr), data_rd, sizeof(data_rd), I2C_TIMEOUT_MS);
+    esp_err_t ret = i2c_master_transmit_receive(*dev_handle, &data_wr, 1, data_rd, 2, 1000);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *val = (data_rd[0] << 8) | data_rd[1]; // MSB | LSB
+    *data = ((uint16_t)data_rd[0] << 8) | data_rd[1];
     return ret;
 }
 
-// Low level function to write the value of a register
-static esp_err_t ads111x_reg_val_wr(ads111x_dev_t *dev, uint8_t reg, uint16_t val)
+esp_err_t ads111x_read_lsb_size(i2c_master_dev_handle_t *dev_handle,
+                                float *val)
 {
-    uint8_t data_wr[3] = {0};
-    data_wr[0] = reg;               // Register address
-    data_wr[1] = (val >> 8) & 0xFF; // MSB
-    data_wr[2] = val & 0xFF;        // LSB
-    return i2c_master_transmit(dev->i2c_dev, data_wr, 3, I2C_TIMEOUT_MS);
+    if (dev_handle == NULL || val == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ads111x_pga_t pga;
+    esp_err_t ret = ads111x_read_pga(dev_handle, &pga);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    else if (pga < ADS111X_PGA_6_144V || pga > ADS111X_PGA_0_256V)
+    {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    static const float s_ads111x_pga_lsb_size[] = {
+        [ADS111X_PGA_6_144V] = 187.5f,
+        [ADS111X_PGA_4_096V] = 125.0f,
+        [ADS111X_PGA_2_048V] = 62.5f,
+        [ADS111X_PGA_1_024V] = 31.25f,
+        [ADS111X_PGA_0_512V] = 15.625f,
+        [ADS111X_PGA_0_256V] = 7.8125f,
+    };
+    *val = s_ads111x_pga_lsb_size[pga];
+    return ret;
+}
+
+static esp_err_t s_ads111x_write_register(i2c_master_dev_handle_t *dev_handle,
+                                          ads111x_reg_t reg,
+                                          uint16_t data)
+{
+    if (dev_handle == NULL ||
+        reg < ADS111X_CONV_REG || reg > ADS111X_HI_THRESH_REG)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t data_wr[3] = {reg,
+                          (uint8_t)(data >> 8),
+                          (uint8_t)data};
+    return i2c_master_transmit(*dev_handle, data_wr, 3, 1000);
 }

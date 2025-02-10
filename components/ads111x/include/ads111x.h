@@ -7,120 +7,145 @@ extern "C"
 {
 #endif
 
-    // ================================ Public Defines ============================================
-
-#define ADS111X_I2C_ADDR_GND 0x48 // I2C address with ADDR pin connected to GND
-#define ADS111X_I2C_ADDR_VDD 0x49 // I2C address with ADDR pin connected to VDD
-#define ADS111X_I2C_ADDR_SDA 0x4A // I2C address with ADDR pin connected to SDA
-#define ADS111X_I2C_ADDR_SCL 0x4B // I2C address with ADDR pin connected to SCL
-
-    // ================================ Public Data Types =========================================
-
-    typedef struct
+    typedef enum
     {
-        i2c_master_dev_handle_t i2c_dev;
-        i2c_port_t i2c_port;
-        uint16_t i2c_addr;
-    } ads111x_dev_t;
+        ADS111X_ADDR_GND = 0x48,
+        ADS111X_ADDR_VDD,
+        ADS111X_ADDR_SDA,
+        ADS111X_ADDR_SCL
+    } ads111x_address_t;
 
     typedef enum
     {
-        ADS111X_MUX_DIFF_0_1 = 0, // Differential P = AIN0, N = AIN1 (default)
-        ADS111X_MUX_DIFF_0_3,     // Differential P = AIN0, N = AIN3
-        ADS111X_MUX_DIFF_1_3,     // Differential P = AIN1, N = AIN3
-        ADS111X_MUX_DIFF_2_3,     // Differential P = AIN2, N = AIN3
-        ADS111X_MUX_SINGLE_0,     // Single-ended AIN0
-        ADS111X_MUX_SINGLE_1,     // Single-ended AIN1
-        ADS111X_MUX_SINGLE_2,     // Single-ended AIN2
-        ADS111X_MUX_SINGLE_3,     // Single-ended AIN3
+        ADS111X_CONV_REG = 0,
+        ADS111X_CONFIG_REG,
+        ADS111X_LO_THRESH_REG,
+        ADS111X_HI_THRESH_REG
+    } ads111x_reg_t;
+
+    typedef enum
+    {
+        ADS111X_OS_BUSY = 0,
+        ADS111X_OS_READY
+    } ads111x_os_t;
+
+    typedef enum
+    {
+        ADS111X_MUX_AIN0_AIN1 = 0,
+        ADS111X_MUX_AIN0_AIN3,
+        ADS111X_MUX_AIN1_AIN3,
+        ADS111X_MUX_AIN2_AIN3,
+        ADS111X_MUX_AIN0_GND,
+        ADS111X_MUX_AIN1_GND,
+        ADS111X_MUX_AIN2_GND,
+        ADS111X_MUX_AIN3_GND
     } ads111x_mux_t;
 
     typedef enum
     {
-        ADS111X_PGA_6_144V = 0, // +/-6.144V range = Gain 2/3
-        ADS111X_PGA_4_096V,     // +/-4.096V range = Gain 1
-        ADS111X_PGA_2_048V,     // +/-2.048V range = Gain 2 (default)
-        ADS111X_PGA_1_024V,     // +/-1.024V range = Gain 4
-        ADS111X_PGA_0_512V,     // +/-0.512V range = Gain 8
-        ADS111X_PGA_0_256V,     // +/-0.256V range = Gain 16
+        ADS111X_PGA_6_144V = 0,
+        ADS111X_PGA_4_096V,
+        ADS111X_PGA_2_048V,
+        ADS111X_PGA_1_024V,
+        ADS111X_PGA_0_512V,
+        ADS111X_PGA_0_256V
     } ads111x_pga_t;
 
     typedef enum
     {
-        ADS111X_MODE_CONTINUOUS = 0, // Continuous conversion mode
-        ADS111X_MODE_SINGLE_SHOT,    // Power-down single-shot mode (default)
+        ADS111X_MODE_CONTINUOUS = 0,
+        ADS111X_MODE_SINGLE_SHOT
     } ads111x_mode_t;
 
     typedef enum
     {
-        ADS111X_DR_8SPS = 0, // 8 samples per second
-        ADS111X_DR_16SPS,    // 16 samples per second
-        ADS111X_DR_32SPS,    // 32 samples per second
-        ADS111X_DR_64SPS,    // 64 samples per second
-        ADS111X_DR_128SPS,   // 128 samples per second (default)
-        ADS111X_DR_250SPS,   // 250 samples per second
-        ADS111X_DR_475SPS,   // 475 samples per second
-        ADS111X_DR_860SPS,   // 860 samples per second
+        ADS111X_DR_8SPS = 0,
+        ADS111X_DR_16SPS,
+        ADS111X_DR_32SPS,
+        ADS111X_DR_64SPS,
+        ADS111X_DR_128SPS,
+        ADS111X_DR_250SPS,
+        ADS111X_DR_475SPS,
+        ADS111X_DR_860SPS
     } ads111x_dr_t;
 
     typedef enum
     {
-        ADS111X_COMP_MODE_TRADITIONAL = 0, // Traditional comparator with hysteresis (default)
-        ADS111X_COMP_MODE_WINDOW,          // Window comparator
+        ADS111X_COMP_MODE_TRADITIONAL = 0,
+        ADS111X_COMP_MODE_WINDOW
     } ads111x_comp_mode_t;
 
     typedef enum
     {
-        ADS111X_COMP_POL_LOW = 0, // Active low (default)
-        ADS111X_COMP_POL_HIGH,    // Active high
+        ADS111X_COMP_POL_LOW = 0,
+        ADS111X_COMP_POL_HIGH
     } ads111x_comp_pol_t;
 
     typedef enum
     {
-        ADS111X_COMP_NON_LATCH = 0, // Non-latching comparator (default)
-        ADS111X_COMP_LATCH,         // Latching comparator
+        ADS111X_COMP_NON_LATCH = 0,
+        ADS111X_COMP_LATCH
     } ads111x_comp_lat_t;
 
     typedef enum
     {
-        ADS111X_COMP_QUE_1 = 0,  // Assert after one conversion
-        ADS111X_COMP_QUE_2,      // Assert after two conversions
-        ADS111X_COMP_QUE_4,      // Assert after four conversions
-        ADS111X_COMP_QUE_DISABLE // Disable comparator (default)
+        ADS111X_COMP_QUE_1 = 0,
+        ADS111X_COMP_QUE_2,
+        ADS111X_COMP_QUE_4,
+        ADS111X_COMP_QUE_DISABLE
     } ads111x_comp_que_t;
 
-    typedef struct
-    {
-        int16_t raw; // Raw conversion result
-        float volt;  // Voltage conversion result in millivolts
-    } ads111x_conv_t;
-
-    // ================================ Public Functions Declaration ==============================
-
-    esp_err_t ads111x_init(ads111x_dev_t *dev, i2c_port_num_t port, uint16_t addr);
-    esp_err_t ads111x_busy(ads111x_dev_t *dev, bool *busy);
-    esp_err_t ads111x_start_conv(ads111x_dev_t *dev);
-    esp_err_t ads111x_get_mux(ads111x_dev_t *dev, ads111x_mux_t *mux);
-    esp_err_t ads111x_set_mux(ads111x_dev_t *dev, ads111x_mux_t mux);
-    esp_err_t ads111x_get_pga(ads111x_dev_t *dev, ads111x_pga_t *pga);
-    esp_err_t ads111x_set_pga(ads111x_dev_t *dev, ads111x_pga_t pga);
-    esp_err_t ads111x_get_mode(ads111x_dev_t *dev, ads111x_mode_t *mode);
-    esp_err_t ads111x_set_mode(ads111x_dev_t *dev, ads111x_mode_t mode);
-    esp_err_t ads111x_get_dr(ads111x_dev_t *dev, ads111x_dr_t *rate);
-    esp_err_t ads111x_set_dr(ads111x_dev_t *dev, ads111x_dr_t rate);
-    esp_err_t ads111x_get_comp_mode(ads111x_dev_t *dev, ads111x_comp_mode_t *comp);
-    esp_err_t ads111x_set_comp_mode(ads111x_dev_t *dev, ads111x_comp_mode_t comp);
-    esp_err_t ads111x_get_comp_pol(ads111x_dev_t *dev, ads111x_comp_pol_t *pol);
-    esp_err_t ads111x_set_comp_pol(ads111x_dev_t *dev, ads111x_comp_pol_t pol);
-    esp_err_t ads111x_get_comp_lat(ads111x_dev_t *dev, ads111x_comp_lat_t *lat);
-    esp_err_t ads111x_set_comp_lat(ads111x_dev_t *dev, ads111x_comp_lat_t lat);
-    esp_err_t ads111x_get_comp_que(ads111x_dev_t *dev, ads111x_comp_que_t *que);
-    esp_err_t ads111x_set_comp_que(ads111x_dev_t *dev, ads111x_comp_que_t que);
-    esp_err_t ads111x_get_comp_lo_thresh(ads111x_dev_t *dev, int16_t *val);
-    esp_err_t ads111x_set_comp_lo_thresh(ads111x_dev_t *dev, int16_t val);
-    esp_err_t ads111x_get_comp_hi_thresh(ads111x_dev_t *dev, int16_t *val);
-    esp_err_t ads111x_set_comp_hi_thresh(ads111x_dev_t *dev, int16_t val);
-    esp_err_t ads111x_get_conv(ads111x_dev_t *dev, ads111x_conv_t *res);
+    esp_err_t ads111x_init(i2c_master_dev_handle_t *dev_handle,
+                           i2c_port_num_t port,
+                           ads111x_address_t address,
+                           uint32_t speed_hz);
+    esp_err_t ads111x_read_os(i2c_master_dev_handle_t *dev_handle,
+                              ads111x_os_t *os);
+    esp_err_t ads111x_start_single_conv(i2c_master_dev_handle_t *dev_handle);
+    esp_err_t ads111x_read_mux(i2c_master_dev_handle_t *dev_handle,
+                               ads111x_mux_t *mux);
+    esp_err_t ads111x_write_mux(i2c_master_dev_handle_t *dev_handle,
+                                ads111x_mux_t mux);
+    esp_err_t ads111x_read_pga(i2c_master_dev_handle_t *dev_handle,
+                               ads111x_pga_t *pga);
+    esp_err_t ads111x_write_pga(i2c_master_dev_handle_t *dev_handle,
+                                ads111x_pga_t pga);
+    esp_err_t ads111x_read_mode(i2c_master_dev_handle_t *dev_handle,
+                                ads111x_mode_t *mode);
+    esp_err_t ads111x_write_mode(i2c_master_dev_handle_t *dev_handle,
+                                 ads111x_mode_t mode);
+    esp_err_t ads111x_read_dr(i2c_master_dev_handle_t *dev_handle,
+                              ads111x_dr_t *dr);
+    esp_err_t ads111x_write_dr(i2c_master_dev_handle_t *dev_handle,
+                               ads111x_dr_t dr);
+    esp_err_t ads111x_read_comp_mode(i2c_master_dev_handle_t *dev_handle,
+                                     ads111x_comp_mode_t *comp_mode);
+    esp_err_t ads111x_write_comp_mode(i2c_master_dev_handle_t *dev_handle,
+                                      ads111x_comp_mode_t comp_mode);
+    esp_err_t ads111x_read_comp_pol(i2c_master_dev_handle_t *dev_handle,
+                                    ads111x_comp_pol_t *comp_pol);
+    esp_err_t ads111x_write_comp_pol(i2c_master_dev_handle_t *dev_handle,
+                                     ads111x_comp_pol_t comp_pol);
+    esp_err_t ads111x_read_comp_lat(i2c_master_dev_handle_t *dev_handle,
+                                    ads111x_comp_lat_t *comp_lat);
+    esp_err_t ads111x_write_comp_lat(i2c_master_dev_handle_t *dev_handle,
+                                     ads111x_comp_lat_t comp_lat);
+    esp_err_t ads111x_read_comp_que(i2c_master_dev_handle_t *dev_handle,
+                                    ads111x_comp_que_t *comp_que);
+    esp_err_t ads111x_write_comp_que(i2c_master_dev_handle_t *dev_handle,
+                                     ads111x_comp_que_t comp_que);
+    esp_err_t ads111x_read_comp_lo_thresh(i2c_master_dev_handle_t *dev_handle,
+                                          int16_t *val);
+    esp_err_t ads111x_write_comp_lo_thresh(i2c_master_dev_handle_t *dev_handle,
+                                           int16_t val);
+    esp_err_t ads111x_read_comp_hi_thresh(i2c_master_dev_handle_t *dev_handle,
+                                          int16_t *val);
+    esp_err_t ads111x_write_comp_hi_thresh(i2c_master_dev_handle_t *dev_handle,
+                                           int16_t val);
+    esp_err_t ads111x_read_conv(i2c_master_dev_handle_t *dev_handle,
+                                int16_t *val);
+    esp_err_t ads111x_read_lsb_size(i2c_master_dev_handle_t *dev_handle,
+                                    float *val);
 
 #ifdef __cplusplus
 }

@@ -7,41 +7,50 @@ extern "C"
 {
 #endif
 
-    // ================================ Public Defines ============================================
-
-#define MCP4725_I2C_ADDR_GND 0x60 // I2C address with ADDR pin connected to GND (default)
-#define MCP4725_I2C_ADDR_VDD 0x61 // I2C address with ADDR pin connected to VDD
-#define MCP4725_I2C_ADDR_SDA 0x62 // I2C address with ADDR pin connected to SDA
-#define MCP4725_I2C_ADDR_SCL 0x63 // I2C address with ADDR pin connected to SCL
-#define MCP4725_MAX_VALUE 4095    // Maximum value for 12-bit DAC
-
-    // ================================ Public Data Types =========================================
-
-    typedef struct
+    typedef enum
     {
-        i2c_master_dev_handle_t i2c_dev;
-        i2c_port_t i2c_port;
-        uint16_t i2c_addr;
-    } mcp4725_dev_t;
+        MCP4725_ADDR_GND = 0x60,
+        MCP4725_ADDR_VDD,
+        MCP4725_ADDR_SDA,
+        MCP4725_ADDR_SCL
+    } mcp4725_address_t;
 
     typedef enum
     {
-        MCP4725_PD_MODE_NORMAL = 0, // Normal mode
-        MCP4725_PD_MODE_1K,         // Power-down mode with 1K ohm pull-up resistor
-        MCP4725_PD_MODE_100K,       // Power-down mode with 100K ohm pull-up resistor
-        MCP4725_PD_MODE_500K,       // Power-down mode with 500K ohm pull-up resistor
+        MCP4725_EEPROM_BUSY = 0,
+        MCP4725_EEPROM_READY
+    } mcp4725_eeprom_status_t;
+
+    typedef enum
+    {
+        MCP4725_PD_MODE_NORMAL = 0,
+        MCP4725_PD_MODE_1K,
+        MCP4725_PD_MODE_100K,
+        MCP4725_PD_MODE_500K
     } mcp4725_pd_mode_t;
 
-    // ================================ Public Functions Declaration ==============================
-
-    esp_err_t mcp4725_init(mcp4725_dev_t *dev, i2c_port_t port, uint16_t addr);
-    esp_err_t mcp4725_eeprom_busy(mcp4725_dev_t *dev, bool *busy);
-    esp_err_t mcp4725_get_pd_mode(mcp4725_dev_t *dev, mcp4725_pd_mode_t *pd_mode, bool eeprom);
-    esp_err_t mcp4725_set_pd_mode(mcp4725_dev_t *dev, mcp4725_pd_mode_t pd_mode, bool eeprom);
-    esp_err_t mcp4725_get_raw(mcp4725_dev_t *dev, uint16_t *val, bool eeprom);
-    esp_err_t mcp4725_set_raw(mcp4725_dev_t *dev, uint16_t val, bool eeprom);
-    esp_err_t mcp4725_get_volt(mcp4725_dev_t *dev, float *volt, float vdd, bool eeprom);
-    esp_err_t mcp4725_set_volt(mcp4725_dev_t *dev, float volt, float vdd, bool eeprom);
+    esp_err_t mcp4725_init(i2c_master_dev_handle_t *dev_handle,
+                           i2c_port_t port,
+                           mcp4725_address_t address,
+                           uint32_t speed_hz);
+    esp_err_t mcp4725_read_eeprom_status(i2c_master_dev_handle_t *dev_handle,
+                                         mcp4725_eeprom_status_t *eeprom_status);
+    esp_err_t mcp4725_read_register_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                            mcp4725_pd_mode_t *pd_mode);
+    esp_err_t mcp4725_read_eeprom_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                          mcp4725_pd_mode_t *pd_mode);
+    esp_err_t mcp4725_read_register_data(i2c_master_dev_handle_t *dev_handle,
+                                         uint16_t *data);
+    esp_err_t mcp4725_read_eeprom_data(i2c_master_dev_handle_t *dev_handle,
+                                       uint16_t *data);
+    esp_err_t mcp4725_write_register_data(i2c_master_dev_handle_t *dev_handle,
+                                          uint16_t data);
+    esp_err_t mcp4725_write_eeprom_data(i2c_master_dev_handle_t *dev_handle,
+                                        uint16_t data);
+    esp_err_t mcp4725_write_register_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                             mcp4725_pd_mode_t pd_mode);
+    esp_err_t mcp4725_write_eeprom_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                           mcp4725_pd_mode_t pd_mode);
 
 #ifdef __cplusplus
 }

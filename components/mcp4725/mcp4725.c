@@ -2,154 +2,190 @@
 #include "driver/i2c_master.h"
 #include "mcp4725.h"
 
-// ================================ Private Defines ===============================================
+#define MCP4725_WR_DAC_REG 0x40
+#define MCP4725_WR_DAC_REG_AND_EEPROM 0x60
 
-// I2C master configuration
-#define I2C_MASTER_FREQ_HZ 100000 // I2C master clock frequency
-#define I2C_TIMEOUT_MS 1000       // I2C timeout in milliseconds
-
-// MCP4725
-#define MCP4725_CMD_WR_DAC 0x40    // Write to DAC register
-#define MCP4725_CMD_WR_EEPROM 0x60 // Write to EEPROM register
-#define MCP4725_EEPROM_READY 0x80  // EEPROM ready bit
-
-// ================================ Public Functions Definitions ==================================
-
-// Initialize the device
-esp_err_t mcp4725_init(mcp4725_dev_t *dev, i2c_port_t port, uint16_t addr)
+esp_err_t mcp4725_init(i2c_master_dev_handle_t *dev_handle,
+                       i2c_port_t port,
+                       mcp4725_address_t address,
+                       uint32_t speed_hz)
 {
-    if (dev == NULL ||
+    if (dev_handle == NULL ||
         port >= I2C_NUM_MAX ||
-        addr < MCP4725_I2C_ADDR_GND || addr > MCP4725_I2C_ADDR_SCL)
+        address < MCP4725_ADDR_GND || address > MCP4725_ADDR_SCL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    dev->i2c_port = port;
-    dev->i2c_addr = addr;
     i2c_master_bus_handle_t bus_handle;
-    esp_err_t ret = i2c_master_get_bus_handle(dev->i2c_port, &bus_handle);
+    esp_err_t ret = i2c_master_get_bus_handle(port, &bus_handle);
     if (ret != ESP_OK)
     {
         return ret;
     }
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = dev->i2c_addr,
-        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
+        .device_address = (uint16_t)address,
+        .scl_speed_hz = speed_hz,
         .scl_wait_us = 1000,
     };
-    return i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev->i2c_dev);
+    return i2c_master_bus_add_device(bus_handle, &dev_cfg, dev_handle);
 }
 
-// Check if the EEPROM is busy
-esp_err_t mcp4725_eeprom_busy(mcp4725_dev_t *dev, bool *busy)
+esp_err_t mcp4725_read_eeprom_status(i2c_master_dev_handle_t *dev_handle,
+                                     mcp4725_eeprom_status_t *eeprom_status)
 {
-    if (dev == NULL || busy == NULL)
+    if (dev_handle == NULL || eeprom_status == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
     uint8_t data_rd = 0;
-    esp_err_t ret = i2c_master_receive(dev->i2c_dev, &data_rd, 1, I2C_TIMEOUT_MS);
+    esp_err_t ret = i2c_master_receive(*dev_handle, &data_rd, 1, 1000);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *busy = (data_rd & MCP4725_EEPROM_READY) == 0;
+    *eeprom_status = (mcp4725_eeprom_status_t)((data_rd & 0x80) >> 7);
     return ret;
 }
 
-// Get the power-down mode from register or EEPROM
-esp_err_t mcp4725_get_pd_mode(mcp4725_dev_t *dev, mcp4725_pd_mode_t *pd_mode, bool eeprom)
+esp_err_t mcp4725_read_register_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                        mcp4725_pd_mode_t *pd_mode)
 {
-    if (dev == NULL || pd_mode == NULL)
+    if (dev_handle == NULL || pd_mode == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t data_rd = 0;
+    esp_err_t ret = i2c_master_receive(*dev_handle, &data_rd, 1, 1000);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    *pd_mode = (mcp4725_pd_mode_t)((data_rd & 0x06) >> 1);
+    return ret;
+}
+
+esp_err_t mcp4725_read_eeprom_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                      mcp4725_pd_mode_t *pd_mode)
+{
+    if (dev_handle == NULL || pd_mode == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
     uint8_t data_rd[4] = {0};
-    esp_err_t ret = i2c_master_receive(dev->i2c_dev, data_rd, eeprom ? 4 : 1, I2C_TIMEOUT_MS);
+    esp_err_t ret = i2c_master_receive(*dev_handle, &data_rd, 4, 1000);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *pd_mode = (mcp4725_pd_mode_t)((eeprom ? data_rd[3] >> 5 : data_rd[0] >> 1) & 0x03);
+    *pd_mode = (mcp4725_pd_mode_t)((data_rd[3] & 0x60) >> 5);
     return ret;
 }
 
-// Set the power-down mode from register or EEPROM
-esp_err_t mcp4725_set_pd_mode(mcp4725_dev_t *dev, mcp4725_pd_mode_t pd_mode, bool eeprom)
+esp_err_t mcp4725_read_register_data(i2c_master_dev_handle_t *dev_handle,
+                                     uint16_t *data)
 {
-    if (dev == NULL ||
-        pd_mode < MCP4725_PD_MODE_NORMAL || pd_mode > MCP4725_PD_MODE_500K)
+    if (dev_handle == NULL || data == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    uint16_t val = 0;
-    esp_err_t ret = mcp4725_get_raw(dev, &val, eeprom);
+    uint8_t data_rd[3] = {0};
+    esp_err_t ret = i2c_master_receive(*dev_handle, data_rd, 3, 1000);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    uint8_t data_wr[3] = {
-        (eeprom ? MCP4725_CMD_WR_EEPROM : MCP4725_CMD_WR_DAC) | ((uint8_t)pd_mode << 1),
-        val >> 4,
-        val << 4,
-    };
-    return i2c_master_transmit(dev->i2c_dev, data_wr, 3, I2C_TIMEOUT_MS);
+    *data = ((uint16_t)data_rd[1] << 4) | ((data_rd[2] & 0xF0) >> 4);
+    return ret;
 }
 
-// Get the raw value from register or EEPROM
-esp_err_t mcp4725_get_raw(mcp4725_dev_t *dev, uint16_t *val, bool eeprom)
+esp_err_t mcp4725_read_eeprom_data(i2c_master_dev_handle_t *dev_handle,
+                                   uint16_t *data)
 {
-    if (dev == NULL || val == NULL)
+    if (dev_handle == NULL || data == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
     uint8_t data_rd[5] = {0};
-    esp_err_t ret = i2c_master_receive(dev->i2c_dev, data_rd, eeprom ? 5 : 3, I2C_TIMEOUT_MS);
+    esp_err_t ret = i2c_master_receive(*dev_handle, data_rd, 5, 1000);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *val = eeprom
-               ? ((uint16_t)(data_rd[3] & 0x0F) << 8) | data_rd[4]
-               : ((uint16_t)data_rd[1] << 4) | ((data_rd[2] & 0xF0) >> 4);
+    *data = ((uint16_t)(data_rd[3] & 0x0F) << 8) | data_rd[4];
     return ret;
 }
 
-// Set the raw value to register or EEPROM
-esp_err_t mcp4725_set_raw(mcp4725_dev_t *dev, uint16_t val, bool eeprom)
+esp_err_t mcp4725_write_register_data(i2c_master_dev_handle_t *dev_handle,
+                                      uint16_t data)
 {
-    if (dev == NULL)
+    if (dev_handle == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
     uint8_t data_wr[3] = {
-        eeprom ? MCP4725_CMD_WR_EEPROM : MCP4725_CMD_WR_DAC,
-        val >> 4,
-        val << 4,
+        MCP4725_WR_DAC_REG,
+        data >> 4,
+        data << 4,
     };
-    return i2c_master_transmit(dev->i2c_dev, data_wr, 3, I2C_TIMEOUT_MS);
+    return i2c_master_transmit(*dev_handle, data_wr, 3, 1000);
 }
 
-// Get the voltage from register or EEPROM
-esp_err_t mcp4725_get_volt(mcp4725_dev_t *dev, float *volt, float vdd, bool eeprom)
+esp_err_t mcp4725_write_eeprom_data(i2c_master_dev_handle_t *dev_handle,
+                                    uint16_t data)
 {
-    if (dev == NULL || volt == NULL)
+    if (dev_handle == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    uint16_t val = 0;
-    esp_err_t ret = mcp4725_get_raw(dev, &val, eeprom);
+    uint8_t data_wr[3] = {
+        MCP4725_WR_DAC_REG_AND_EEPROM,
+        data >> 4,
+        data << 4,
+    };
+    return i2c_master_transmit(*dev_handle, data_wr, 3, 1000);
+}
+
+esp_err_t mcp4725_write_register_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                         mcp4725_pd_mode_t pd_mode)
+{
+    if (dev_handle == NULL ||
+        pd_mode < MCP4725_PD_MODE_NORMAL || pd_mode > MCP4725_PD_MODE_500K)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = mcp4725_read_register_data(dev_handle, &data);
     if (ret != ESP_OK)
     {
         return ret;
     }
-    *volt = (vdd / (float)MCP4725_MAX_VALUE) * (float)val;
-    return ret;
+    uint8_t data_wr[3] = {
+        MCP4725_WR_DAC_REG | ((uint8_t)pd_mode << 1),
+        data >> 4,
+        data << 4,
+    };
+    return i2c_master_transmit(*dev_handle, data_wr, 3, 1000);
 }
 
-// Set the voltage to register or EEPROM
-esp_err_t mcp4725_set_volt(mcp4725_dev_t *dev, float volt, float vdd, bool eeprom)
+esp_err_t mcp4725_write_eeprom_pd_mode(i2c_master_dev_handle_t *dev_handle,
+                                       mcp4725_pd_mode_t pd_mode)
 {
-    return mcp4725_set_raw(dev, (uint16_t)((volt / vdd) * MCP4725_MAX_VALUE), eeprom);
+    if (dev_handle == NULL ||
+        pd_mode < MCP4725_PD_MODE_NORMAL || pd_mode > MCP4725_PD_MODE_500K)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t data = 0;
+    esp_err_t ret = mcp4725_read_eeprom_data(dev_handle, &data);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    uint8_t data_wr[3] = {
+        MCP4725_WR_DAC_REG_AND_EEPROM | ((uint8_t)pd_mode << 1),
+        data >> 4,
+        data << 4,
+    };
+    return i2c_master_transmit(*dev_handle, data_wr, 3, 1000);
 }
